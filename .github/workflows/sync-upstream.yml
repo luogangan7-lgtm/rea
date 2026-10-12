@@ -52,6 +52,29 @@ jobs:
               signal: AbortSignal.timeout(60000),
             });
             if (!response.ok) {
+              const sanitize = (value) => {
+                if (typeof value !== 'string') return '';
+                const token = process.env.GH_TOKEN;
+                return (token ? value.split(token).join('[REDACTED]') : value)
+                  .replace(/(?:github_pat_|gh[pousr]_)[A-Za-z0-9_]+/g, '[REDACTED]')
+                  .replace(/\bBearer\s+\S+/gi, 'Bearer [REDACTED]')
+                  .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
+                  .slice(0, 600);
+              };
+              const detail = await response.json().catch(() => null);
+              const diagnostic = {
+                method, path, status: response.status,
+                request_id: sanitize(response.headers.get('x-github-request-id')),
+                message: sanitize(detail?.message),
+                errors: Array.isArray(detail?.errors) ? detail.errors.slice(0, 5).map((error) =>
+                  typeof error === 'string' ? sanitize(error) : Object.fromEntries(
+                    ['resource', 'field', 'code', 'message'].filter((key) =>
+                      typeof error?.[key] === 'string').map((key) => [key, sanitize(error[key])])
+                  )
+                ) : [],
+              };
+              summary('GitHub API diagnostic: ' + JSON.stringify(diagnostic)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'));
               if (method === 'POST' && response.status === 409) {
                 throw new Error('Merge conflict: upstream sync stopped. Resolve the conflict manually; this workflow never force-pushes.');
               }
